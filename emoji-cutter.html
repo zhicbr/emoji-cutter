@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>表情包切片器 | 4x6 Grid Slicer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @keyframes fade-in-up {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-card { animation: fade-in-up 0.5s ease-out forwards; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        /* 确保页面即使内容少时也居中，内容多时可滚动 */
+        body {
+            height: 100vh; /* 强制视口高度 */
+            overflow-x: hidden; /* 禁止横向滚动 */
+        }
+        /* 主内容区域自适应 */
+        #app-container {
+            min-height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+    </style>
+</head>
+<!-- 使用 h-screen 和 overflow-y-auto 组合，解决滚动条问题 -->
+<body class="bg-slate-50 text-slate-800 font-sans overflow-y-auto">
+
+    <div id="app-container" class="py-6 px-4 transition-all duration-500 w-full justify-center">
+
+        <!-- 头部区域 -->
+        <header id="mainHeader" class="text-center mb-6 max-w-2xl transition-all duration-500 flex flex-col items-center">
+            <!-- 初始图标稍微调小一点 w-14 (原w-16) -->
+            <div id="headerIcon" class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-indigo-600 text-white mb-4 shadow-lg shadow-indigo-200 transition-all duration-500">
+                <i class="fa-solid fa-scissors text-xl transition-all duration-500"></i>
+            </div>
+            <!-- 初始标题稍微调小 text-3xl (原4xl) -->
+            <h1 id="headerTitle" class="text-3xl font-extrabold tracking-tight text-slate-900 mb-2 transition-all duration-500">表情包切片器</h1>
+            <p class="text-base text-slate-500 transition-all duration-500" id="headerDesc">
+                将 4x6 图片瞬间拆解为 24 个表情单元<br>
+                <span class="text-indigo-600 font-medium">点击生成的图片即可下载</span>
+            </p>
+        </header>
+
+        <!-- 操作主区域 -->
+        <main class="w-full max-w-4xl relative flex flex-col items-center transition-all duration-500">
+            
+            <!-- 上传卡片：高度压缩至 h-36 (原h-48)，更紧凑 -->
+            <div id="uploadCard" class="w-full max-w-xl bg-white rounded-2xl shadow-lg border border-slate-100 p-6 mb-6 text-center transition-all duration-500 hover:shadow-xl">
+                <input type="file" id="imageInput" accept="image/*" class="hidden">
+                <label for="imageInput" class="cursor-pointer flex flex-col items-center justify-center w-full h-36 border-2 border-dashed border-slate-300 rounded-xl bg-slate-50 hover:bg-indigo-50 hover:border-indigo-400 transition-colors group">
+                    <div class="mb-3 p-3 rounded-full bg-white shadow-sm group-hover:scale-110 transition-transform">
+                        <i class="fa-solid fa-cloud-arrow-up text-2xl text-indigo-500"></i>
+                    </div>
+                    <span class="text-base font-medium text-slate-600 group-hover:text-indigo-600">点击上传图片</span>
+                    <span class="text-xs text-slate-400 mt-1">支持 JPG, PNG</span>
+                </label>
+            </div>
+
+            <!-- 状态栏 (初始隐藏) -->
+            <div id="statusArea" class="hidden w-full max-w-3xl mb-4 flex justify-between items-center bg-indigo-900 text-white px-4 py-2 rounded-lg shadow-lg transition-all duration-500">
+                <div class="flex items-center gap-2">
+                    <div class="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" id="spinner"></div>
+                    <span id="statusText" class="font-medium text-sm">正在处理...</span>
+                </div>
+                <button onclick="resetApp()" class="text-xs bg-white/10 hover:bg-white/20 text-white px-3 py-1 rounded-lg transition border border-white/20 backdrop-blur-sm">
+                    <i class="fa-solid fa-rotate-left mr-1"></i>重选图片
+                </button>
+            </div>
+
+            <!-- 结果展示网格 -->
+            <div id="resultGrid" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3 w-full transition-all duration-500">
+                <!-- 图片插入位置 -->
+            </div>
+
+        </main>
+
+        <footer id="mainFooter" class="mt-8 text-slate-300 text-xs transition-opacity duration-500">
+            © 2024 Image Slicer Tool
+        </footer>
+    
+    </div>
+
+    <script>
+        const imageInput = document.getElementById('imageInput');
+        const uploadCard = document.getElementById('uploadCard');
+        const resultGrid = document.getElementById('resultGrid');
+        const statusArea = document.getElementById('statusArea');
+        const statusText = document.getElementById('statusText');
+        const spinner = document.getElementById('spinner');
+        const mainHeader = document.getElementById('mainHeader');
+        const headerDesc = document.getElementById('headerDesc');
+        const headerTitle = document.getElementById('headerTitle');
+        const headerIcon = document.getElementById('headerIcon');
+        const headerIconI = headerIcon.querySelector('i');
+        const appContainer = document.getElementById('app-container');
+        const mainFooter = document.getElementById('mainFooter');
+
+        const ROWS = 4;
+        const COLS = 6;
+
+        imageInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            // --- 进入“结果模式” ---
+            
+            // 1. 布局调整：取消垂直居中，改为顶部对齐，方便展示长列表
+            appContainer.classList.remove('justify-center');
+            
+            // 2. 隐藏上传卡片和描述
+            uploadCard.classList.add('hidden'); 
+            headerDesc.classList.add('hidden');
+            mainFooter.classList.add('opacity-0'); // 隐藏 Footer 避免干扰，或者你可以保留
+            
+            // 3. 极度压缩 Header
+            mainHeader.classList.remove('mb-6');
+            mainHeader.classList.add('mb-4');
+            
+            headerTitle.classList.remove('text-3xl', 'mb-2');
+            headerTitle.classList.add('text-xl', 'mb-0'); // 更小
+            
+            headerIcon.classList.remove('w-14', 'h-14', 'mb-4');
+            headerIcon.classList.add('w-8', 'h-8', 'mb-2', 'rounded-lg'); // 更小
+            
+            headerIconI.classList.remove('text-xl');
+            headerIconI.classList.add('text-sm');
+
+            // 4. 显示状态栏
+            statusArea.classList.remove('hidden');
+            statusArea.classList.add('flex');
+            
+            // 5. 准备处理
+            spinner.classList.remove('hidden');
+            statusText.textContent = `解析中...`;
+            resultGrid.innerHTML = '';
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const img = new Image();
+                img.onload = function() {
+                    setTimeout(() => sliceImage(img, file.name), 100);
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+
+        function resetApp() {
+            imageInput.value = '';
+            
+            // --- 恢复“初始模式” ---
+            
+            // 1. 恢复垂直居中
+            appContainer.classList.add('justify-center');
+            
+            // 2. 恢复显示
+            uploadCard.classList.remove('hidden');
+            headerDesc.classList.remove('hidden');
+            mainFooter.classList.remove('opacity-0');
+            
+            // 3. 恢复 Header 样式
+            mainHeader.classList.remove('mb-4');
+            mainHeader.classList.add('mb-6');
+            
+            headerTitle.classList.remove('text-xl', 'mb-0');
+            headerTitle.classList.add('text-3xl', 'mb-2');
+            
+            headerIcon.classList.remove('w-8', 'h-8', 'mb-2', 'rounded-lg');
+            headerIcon.classList.add('w-14', 'h-14', 'mb-4');
+            
+            headerIconI.classList.remove('text-sm');
+            headerIconI.classList.add('text-xl');
+
+            statusArea.classList.add('hidden');
+            statusArea.classList.remove('flex');
+            resultGrid.innerHTML = '';
+        }
+
+        function sliceImage(sourceImage, fileName) {
+            const pieceWidth = Math.floor(sourceImage.width / COLS);
+            const pieceHeight = Math.floor(sourceImage.height / ROWS);
+            let count = 0;
+            const baseName = fileName.substring(0, fileName.lastIndexOf('.')) || 'sticker';
+
+            for (let y = 0; y < ROWS; y++) {
+                for (let x = 0; x < COLS; x++) {
+                    setTimeout(() => {
+                        createPiece(sourceImage, x, y, pieceWidth, pieceHeight, baseName, count);
+                        count++;
+                        if (count === ROWS * COLS) {
+                            spinner.classList.add('hidden');
+                            statusText.textContent = `✅ 完成 (点击下载)`;
+                        }
+                    }, count * 30);
+                }
+            }
+        }
+
+        function createPiece(img, x, y, width, height, baseFileName, index) {
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, x * width, y * height, width, height, 0, 0, width, height);
+            const dataUrl = canvas.toDataURL('image/png');
+
+            const wrapper = document.createElement('div');
+            wrapper.className = `
+                group relative bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden 
+                cursor-pointer transition-all duration-300 hover:shadow-lg hover:-translate-y-1 
+                hover:ring-2 hover:ring-indigo-100 animate-card
+            `;
+            wrapper.style.animationDelay = `${index * 0.03}s`; // 加快一点动画
+
+            const resultImg = document.createElement('img');
+            resultImg.src = dataUrl;
+            resultImg.className = "w-full h-auto object-cover";
+
+            const overlay = document.createElement('div');
+            overlay.className = `
+                absolute inset-0 bg-indigo-900/0 group-hover:bg-indigo-900/10 
+                flex items-center justify-center transition-all duration-200
+            `;
+            const icon = document.createElement('div');
+            icon.className = `
+                opacity-0 group-hover:opacity-100 transform scale-50 group-hover:scale-100 
+                transition-all duration-200 bg-white text-indigo-600 p-2 rounded-full shadow-lg text-xs
+            `;
+            icon.innerHTML = '<i class="fa-solid fa-download"></i>';
+            
+            overlay.appendChild(icon);
+            wrapper.appendChild(resultImg);
+            wrapper.appendChild(overlay);
+
+            wrapper.onclick = function() {
+                const link = document.createElement('a');
+                link.download = `${baseFileName}_${index + 1}.png`;
+                link.href = dataUrl;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+
+                wrapper.classList.add('ring-2', 'ring-green-400');
+                setTimeout(() => wrapper.classList.remove('ring-green-400'), 200);
+            };
+
+            resultGrid.appendChild(wrapper);
+        }
+    </script>
+</body>
+</html>
